@@ -39,7 +39,7 @@ ASNode::ASNode(int _id, Generator<double>* _gen, bool _involved):
 	process_std(102400),
 	sending_mean(1.0/100),
 	sending_std(1.0/100),
-	qos_refresh_lambda(1),
+	qos_refresh_lambda(0.1),
 	qos_mean(1024000),
 	qos_std(102400),
 	trading_refresh_lambda(0.1),
@@ -70,10 +70,11 @@ void ASNode::build_routing(bool build_weighted, bool build_payload) {
 	auto graph = generator->GetGraph();
 	if (build_payload) {
 		vector<vector<int>> uw_paths = graph->ShortestPath(id, false, true);
-		routing_table = uw_paths;//build_table(uw_paths, id);
+		routing_table = build_table(uw_paths, id);
 	}
 	if (involved and build_weighted) {
 		vector<vector<int>> w_paths = graph->ShortestPath(id, true, true);
+		std::cerr << "Shortest done\n";
 		trading_routing_table = w_paths;//build_table(w_paths, id);
 	}
 }
@@ -95,18 +96,22 @@ vector<Event*> ASNode::init_event(double world_time) {
 vector<Event*> ASNode::process_event(Event* evnt, double world_time) {
 	TransitEvent* transit = dynamic_cast<TransitEvent*>(evnt);
 	if (transit) {
+		std::cerr << "Processing transit\n";
 		return process_transit_event(transit, world_time);
 	}
 	SendEvent* send = dynamic_cast<SendEvent*>(evnt);
 	if (send) {
+		std::cerr << "Processing send\n";
 		return process_send_event(send, world_time);
 	}
 	QualityRefreshEvent* qos = dynamic_cast<QualityRefreshEvent*>(evnt);
 	if (qos) {
+		std::cerr << "Processing qos\n";
 		return process_quality_event(qos, world_time);
 	}
 	TradingQualityEvent* trading = dynamic_cast<TradingQualityEvent*>(evnt);
 	if (trading) {
+		std::cerr << "Processing trading\n";
 		return process_trading_event(trading, world_time);
 	}
 	return vector<Event*>();
@@ -115,14 +120,16 @@ vector<Event*> ASNode::process_event(Event* evnt, double world_time) {
 vector<Event*> ASNode::process_send_event(SendEvent* evnt, double world_time) {
 	vector<Event*> reply;
 	TransitEvent* transit = new TransitEvent(evnt->scheduled_time, evnt->src, evnt->dst, evnt->size);
-	vector<int> next_hop;
 	if (involved and involved_nodes.find(evnt->dst) != involved_nodes.end()) {
+		vector<int> next_hop;
 		next_hop = trading_routing_table[evnt->dst];
+		transit->routing = next_hop;
+		transit->executor = next_hop[0];
 	} else {
-		next_hop = routing_table[evnt->dst];
+		int next_hop = routing_table[evnt->dst];
+		transit->routing = vector<int>();
+		transit->executor = next_hop;
 	}
-	transit->executor = next_hop[0];
-	transit->routing = next_hop;
 	transit->scheduled_time += transit->size / get_bandwidth(transit);
 	reply.push_back(transit);
 	double next_traffic_send = std::min(abs(generator->generate_weibull(sending_mean, sending_std)),
@@ -141,8 +148,11 @@ vector<Event*> ASNode::process_send_event(SendEvent* evnt, double world_time) {
 vector<Event*> ASNode::process_transit_event(TransitEvent* evnt, double world_time) {
 	vector<Event*> reply;
 	if (evnt->dst == id) {
+		std::cerr << "Self event\n";
 		if (evnt->src != id) {
+			std::cerr << "Not from myself\n";
 			if (direct_connections.find(evnt->src) != direct_connections.end()) {
+				std::cerr << "Direct insertion\n";
 				if (avg_delay_to_direct.count(evnt->src) == 0) {
 					avg_delay_to_direct.insert(pair<int, double>(evnt->src, 0));
 					packets_sent.insert(pair<int, int>(evnt->src, 0));
@@ -158,10 +168,16 @@ vector<Event*> ASNode::process_transit_event(TransitEvent* evnt, double world_ti
 				packets_it->second = events_checked + 1;
 			}
 			if (world_time > 0.001) {
+				std::cerr << "World time high\n";
 				double process_time = 0;//evnt->size / get_bandwidth(evnt);
 				double delay = world_time + process_time - evnt->creation_time;
-				delays.push_back(std::pair<double, double>(delay, world_time));
+				auto x = std::pair<double, double>(delay, world_time);
+				std::cerr << "Heap corruption after " << delay << " " << delays.size() << "\n";
+				delays.push_back(x);
+				std::cerr << "Precomuted\n";
+				std::flush(std::cerr);
 				if (direct_connections.find(evnt->src) != direct_connections.end()) {
+					std::cerr << "Delay compuation\n";
 					auto packets_iter = packets_sent.find(evnt->src);
 					int packets = packets_iter->second;
 					auto local_delay_iter = avg_delay_to_direct.find(evnt->src);
@@ -178,10 +194,15 @@ vector<Event*> ASNode::process_transit_event(TransitEvent* evnt, double world_ti
 		delete evnt;
 		return reply;
 	}
-	int next_hop = evnt->routing[0];
+	int next_hop = 0;
+	if (evnt->routing.size() != 0) {
+		next_hop = evnt->routing[0];
+		evnt->routing.erase(evnt->routing.begin());
+	} else {
+		next_hop = routing_table[evnt->dst];
+	}
 	double bandwidth = get_bandwidth(evnt);
 	evnt->executor = next_hop;
-	evnt->routing.erase(evnt->routing.begin());
 	double execution_time = evnt->size / (1 + bandwidth);
 	//local_time = std::max(world_time, local_time) + execution_time;
 	auto hop_data = to_port_local_time.find(next_hop);
@@ -230,6 +251,7 @@ vector<Event*> ASNode::process_trading_event(TradingQualityEvent* evnt, double w
 	vector<Event*> reply;
 	reply.push_back(evnt);
 	generator->GetGraph()->SetIncomingWeight(id, 1.0/trading_mean);
+	std::cerr << "Building routing\n";
 	build_routing(false, true);
 	return reply;
 }

@@ -52,7 +52,7 @@ private:
 
 	int id;
 
-	vector<vector<int>> routing_table;
+	map<int, int> routing_table;
 	vector<vector<int>> trading_routing_table;
 	set<int> involved_nodes;
 
