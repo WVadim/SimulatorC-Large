@@ -40,18 +40,27 @@ ASNode::ASNode(int _id, Generator<double>* _gen, bool _involved):
 	generator(_gen),
 	process_mean(1024000),
 	process_std(102400),
-	sending_mean(1.0/100),
-	sending_std(1.0/100),
-	qos_refresh_lambda(100),
+	sending_mean(1000),
+	sending_std(100),
+	qos_refresh_lambda(5),
 	qos_mean(1024000),
 	qos_std(102400),
-	trading_refresh_lambda(100),
+	trading_refresh_lambda(5),
 	trading_mean(1024000),
 	trading_std(102400),
 	trading_qos_mean(1024000),
 	trading_qos_std(102400),
 	local_time(0),
 	involved(_involved) {
+	int total = _gen->GetGraph()->NodesSize();
+	process_mean = total * 64 * 2 * sending_mean;
+	process_std = process_mean * 0.1;
+	qos_mean = process_mean;
+	qos_std = process_std;
+	trading_mean = process_mean;
+	trading_std = process_std;
+	trading_qos_mean = trading_mean;
+	trading_qos_std = trading_std;
 	build_routing();
 	get_direct_connections();
 }
@@ -139,9 +148,9 @@ vector<Event*> ASNode::process_send_event(SendEvent* evnt, double world_time) {
 	transit->routing = next_hop;
 	transit->scheduled_time += transit->size / get_bandwidth(transit);
 	reply.push_back(transit);
-	double next_traffic_send = std::min(abs(generator->generate_weibull(sending_mean, sending_std)),
-			1.5 * sending_mean);
-	next_traffic_send = std::max(next_traffic_send, sending_mean / 2);
+	double next_traffic_send = generator->generate_exponential(sending_mean);//std::min(abs(generator->generate_weibull(sending_mean, sending_std)),
+			//1.5 * sending_mean);
+	//next_traffic_send = std::max(next_traffic_send, sending_mean / 2);
 	next_traffic_send += world_time;
 	int packet_size = 64;
 	int target = id;
@@ -199,8 +208,10 @@ vector<Event*> ASNode::process_transit_event(TransitEvent* evnt, double world_ti
 	double execution_time = evnt->size / (1 + bandwidth);
 	//local_time = std::max(world_time, local_time) + execution_time;
 	auto hop_data = to_port_local_time.find(next_hop);
+	//evnt->scheduled_time = world_time + execution_time;//std::max(hop_data->second, world_time) + execution_time;
 	evnt->scheduled_time = std::max(hop_data->second, world_time) + execution_time;
 	hop_data->second = evnt->scheduled_time;
+	//hop_data->second = world_time;//evnt->scheduled_time;
 	reply.push_back(evnt);
 	return reply;
 }
@@ -221,31 +232,36 @@ double ASNode::get_bandwidth(TransitEvent* evnt) {
 }
 
 vector<Event*> ASNode::process_quality_event(QualityRefreshEvent* evnt, double world_time) {
-	double new_process_mean = std::max(abs(generator->generate_normal(qos_mean, qos_std)), qos_mean / 2);
-	double new_process_std = std::max(abs(generator->generate_normal(qos_std, qos_std)), qos_std / 2);
-	process_mean = new_process_mean;
-	process_std = new_process_std;
+	//double new_process_mean = std::max(abs(generator->generate_normal(qos_mean, qos_std)), qos_mean / 2);
+	//double new_process_std = std::max(abs(generator->generate_normal(qos_std, qos_std)), qos_std / 2);
+	//process_mean = new_process_mean;
+	//process_std = new_process_std;
 	evnt->scheduled_time = world_time + generator->generate_exponential(qos_refresh_lambda);
 	vector<Event*> reply;
 	reply.push_back(evnt);
-	//for (int i : direct_connections) {
-	//	double payload = avg_delay_to_direct.find(i)->second;
-	//	generator->GetGraph()->GetEdge(id, i)->SetPayload(payload);
-	//}
+	for (int i : direct_connections) {
+		double payload = avg_delay_to_direct.find(i)->second;
+		if (involved)
+			payload = 1;
+		//assert(generator);
+		//assert(generator->GetGraph());
+		//std::cerr << generator->GetGraph()->NodesSize() << " " << id << " " << i << " " << payload << "\n";
+		//generator->GetGraph()->SetWeight(id, i, payload);
+	}
 	//build_routing(true, false);
 	return reply;
 }
 
 vector<Event*> ASNode::process_trading_event(TradingQualityEvent* evnt, double world_time) {
-	double new_trading_mean = std::max(abs(generator->generate_normal(trading_qos_mean, trading_qos_std)), trading_qos_mean / 2);
-	double new_trading_std = std::max(abs(generator->generate_normal(trading_qos_std, trading_qos_std)), trading_qos_std / 2);
-	trading_mean = new_trading_mean;
-	trading_std = new_trading_std;
+	//double new_trading_mean = std::max(abs(generator->generate_normal(trading_qos_mean, trading_qos_std)), trading_qos_mean / 2);
+	//double new_trading_std = std::max(abs(generator->generate_normal(trading_qos_std, trading_qos_std)), trading_qos_std / 2);
+	//trading_mean = new_trading_mean;
+	//trading_std = new_trading_std;
 	evnt->scheduled_time = world_time + generator->generate_exponential(trading_refresh_lambda);
 	vector<Event*> reply;
 	reply.push_back(evnt);
-	generator->GetGraph()->SetIncomingWeight(id, 1.0/trading_mean);
-	build_routing(false, true);
+	//generator->GetGraph()->SetIncomingWeight(id, 1.0/trading_mean);
+	//build_routing(false, true);
 	return reply;
 }
 

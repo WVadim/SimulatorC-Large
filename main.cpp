@@ -7,7 +7,7 @@
 #include <fstream>
 #include <string>
 using namespace std;
-//#define OUTPUT
+#define OUTPUT
 int main(int argc, char** argv) {
 
 	int seed = stoi(argv[1]);
@@ -25,8 +25,10 @@ int main(int argc, char** argv) {
 	ofstream delays_file;
 	delays_file.open("sim_result.sr");
 #endif
+	//std::cout << delays.size() << "\n";
 	double mean = 0;
 	for (unsigned int i = 0; i < delays.size(); i++) {
+		//std::cout << mean << "\n";
 		mean += delays[i].first;
 #ifdef OUTPUT
 		delays_file << delays[i].first << " " << delays[i].second << endl;
